@@ -1,0 +1,32 @@
+# Canteen web UI (React) - custom Podman image
+# Multi-stage build: Node builds the React app, nginx serves the static files.
+
+# ---------- Stage 1: build the React app ----------
+FROM docker.io/library/node:22-alpine AS build
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY index.html vite.config.js ./
+COPY src ./src
+RUN npm run build
+
+# ---------- Stage 2: serve with nginx ----------
+FROM docker.io/library/nginx:1.28-alpine
+
+LABEL org.opencontainers.image.title="canteen-web" \
+      org.opencontainers.image.description="React front end for the Canteen Pre-order System" \
+      org.opencontainers.image.version="1.0"
+
+# nginx fills in ${API_HOST} and ${API_PORT} from these when the container starts.
+# API_HOST is the backend container's name on the Podman network.
+ENV API_HOST=canteen-api \
+    API_PORT=3000 \
+    NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
+
+COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /build/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://localhost/ >/dev/null || exit 1

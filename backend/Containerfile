@@ -1,0 +1,34 @@
+# Canteen API (Node.js + Express) - custom Podman image
+FROM docker.io/library/node:22-alpine
+
+LABEL org.opencontainers.image.title="canteen-api" \
+      org.opencontainers.image.description="REST API for the Canteen Pre-order System" \
+      org.opencontainers.image.version="1.0"
+
+WORKDIR /app
+
+# Copy package files first so the dependency layer is cached when only code changes.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+COPY src ./src
+
+# /data holds db.json (menu + orders). Mount a Podman volume here.
+RUN mkdir -p /data && chown node:node /data
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    DATA_DIR=/data \
+    APP_TZ=Asia/Kolkata
+
+EXPOSE 3000
+VOLUME ["/data"]
+
+# The official node image ships a non-root user called "node".
+USER node
+
+# Podman marks the container healthy/unhealthy using this (build with --format docker).
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/api/health || exit 1
+
+CMD ["node", "src/server.js"]
